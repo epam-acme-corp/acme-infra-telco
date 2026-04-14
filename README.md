@@ -64,3 +64,20 @@ npx tsc --noEmit
 pulumi preview
 pulumi up
 ```
+
+## State Management
+
+This repository stores Pulumi state in Azure Blob Storage using:
+
+```yaml
+backend:
+  url: azblob://pulumi-state
+```
+
+Initial backend provisioning is managed in `epam-acme-corp/acme-infra-bootstrap`.
+
+Set this environment variable in local shells and CI:
+
+```bash
+export AZURE_STORAGE_ACCOUNT=stacmestateprod
+```
