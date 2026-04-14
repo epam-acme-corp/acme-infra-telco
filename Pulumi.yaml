@@ -1,0 +1,3 @@
+name: acme-infra-telco
+runtime: nodejs
+description: Acme Telco Spoke Infrastructure — Pulumi TypeScript
