@@ -1,12 +1,22 @@
 import * as pulumi from "@pulumi/pulumi";
 import * as azure from "@pulumi/azure-native";
 import * as k8s from "@pulumi/kubernetes";
+import { deployIngress } from "./ingress";
+import { configureNetworkPolicies } from "./networkPolicies";
+import { configureRbac } from "./rbac";
 
 const config = new pulumi.Config();
 const location = config.get("location") ?? "eastus";
 const hubVnetResourceId = config.require("hubVnetResourceId");
 const postgresAdminLogin = config.get("postgresAdminLogin") ?? "acmepsqladmin";
 const postgresAdminPassword = config.requireSecret("postgresAdminPassword");
+const subscriptionId = azure.authorization.getClientConfigOutput().subscriptionId;
+const hubFirewallPrivateIp = config.get("hubFirewallPrivateIp") ?? "10.0.1.4";
+const hubAcrResourceId = pulumi.interpolate`/subscriptions/${subscriptionId}/resourceGroups/rg-acme-hub-prod/providers/Microsoft.ContainerRegistry/registries/acracmehubprod`;
+const hubKeyVaultUri = config.get("hubKeyVaultUri") ?? "https://kv-acme-hub-prod.vault.azure.net/";
+const opcoPlatformGroupObjectId = config.get("opcoPlatformGroupObjectId") ?? "11111111-1111-1111-1111-111111111111";
+const opcoReadOnlyGroupObjectId = config.get("opcoReadOnlyGroupObjectId") ?? "22222222-2222-2222-2222-222222222222";
+const namespaceUserGroupObjectIds = config.getObject<Record<string, string>>("namespaceUserGroupObjectIds") ?? {};
 
 const rg = new azure.resources.ResourceGroup("rg-acme-telco-prod", {
   resourceGroupName: "rg-acme-telco-prod",
@@ -184,6 +194,9 @@ const namespaceDefinitions = [
   { name: "service-provisioning", short: "provisioning" },
   { name: "fault-management", short: "fault" },
 ];
+const namespaceNames = namespaceDefinitions.map((ns) => ns.name);
+const databasePrivateEndpointCidrs = ["10.5.17.0/24"];
+const databaseEgressPorts = [5432, 10000];
 
 const namespaceIdentities = namespaceDefinitions.map((ns) =>
   new azure.managedidentity.UserAssignedIdentity(`id-acme-telco-${ns.short}`, {
@@ -218,6 +231,30 @@ namespaceDefinitions.forEach((ns) => {
     },
     { provider: k8sProvider, dependsOn: [aks] },
   );
+});
+
+configureNetworkPolicies({
+  provider: k8sProvider,
+  namespaces: namespaceNames,
+  databasePrivateEndpointCidrs,
+  databaseEgressPorts,
+  hubFirewallPrivateIp,
+});
+
+deployIngress({
+  provider: k8sProvider,
+  keyVaultUri: hubKeyVaultUri,
+});
+
+configureRbac({
+  resourceGroupId: rg.id,
+  aksClusterId: aks.id,
+  aksKubeletObjectId: aks.identityProfile.apply((identityProfile) => identityProfile?.kubeletidentity?.objectId ?? ""),
+  namespaces: namespaceNames,
+  opcoPlatformGroupObjectId,
+  opcoReadOnlyGroupObjectId,
+  namespaceUserGroupObjectIds,
+  hubAcrResourceId,
 });
 
 const postgresSku = { name: "GP_Standard_D4s_v3", tier: "GeneralPurpose" };
